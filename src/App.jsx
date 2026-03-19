@@ -4,6 +4,7 @@ import Overview from './pages/Overview';
 import ReferralSources from './pages/ReferralSources';
 import CommissionRules from './pages/CommissionRules';
 import Payments from './pages/Payments';
+import CompanySplits from './pages/CompanySplits';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route path="/referral-sources" element={<ReferralSources />} />
           <Route path="/commission-rules" element={<CommissionRules />} />
           <Route path="/payments" element={<Payments />} />
+          <Route path="/company-splits" element={<CompanySplits />} />
         </Routes>
       </Layout>
     </BrowserRouter>

@@ -177,6 +177,68 @@ export const commissions = {
   },
 };
 
+export const partners = {
+  async list() {
+    const records = await fetchAllRecords(config.trackerBaseId, 'Partners');
+    return records.map(r => ({ id: r.id, ...r.fields }));
+  },
+
+  async create(data) {
+    const result = await airtableRequest(config.trackerBaseId, 'Partners', {
+      method: 'POST',
+      body: JSON.stringify({ fields: data }),
+    });
+    return { id: result.id, ...result.fields };
+  },
+
+  async update(id, data) {
+    const result = await airtableRequest(config.trackerBaseId, `Partners/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: data }),
+    });
+    return { id: result.id, ...result.fields };
+  },
+
+  async delete(id) {
+    await airtableRequest(config.trackerBaseId, `Partners/${id}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+export const companySplits = {
+  async list(options = {}) {
+    const records = await fetchAllRecords(config.trackerBaseId, 'Company Splits', {
+      sort: [{ field: 'Date', direction: 'desc' }],
+      ...options,
+    });
+    return records.map(r => ({ id: r.id, ...r.fields }));
+  },
+
+  async create(data) {
+    const result = await airtableRequest(config.trackerBaseId, 'Company Splits', {
+      method: 'POST',
+      body: JSON.stringify({ fields: data }),
+    });
+    return { id: result.id, ...result.fields };
+  },
+
+  async update(id, data) {
+    const result = await airtableRequest(config.trackerBaseId, `Company Splits/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: data }),
+    });
+    return { id: result.id, ...result.fields };
+  },
+
+  async markDistributed(id) {
+    return this.update(id, {
+      Status: 'Distributed',
+      'Date Distributed': new Date().toISOString().split('T')[0],
+    });
+  },
+};
+
 // ============================================
 // CONTRACTOR BASE OPERATIONS (Read-only)
 // ============================================
@@ -323,11 +385,38 @@ export function calculateCommission(rule, job) {
   };
 }
 
+/**
+ * Calculate company splits for a job after commissions
+ */
+export function calculateCompanySplits(job, commissionAmount, partnersList) {
+  const netProfit = (job['Total Payout'] || 0) - (job.totalCosts || 0);
+  const distributableProfit = netProfit - commissionAmount;
+
+  const splits = partnersList
+    .filter(p => p.Active)
+    .map(partner => ({
+      partnerId: partner.id,
+      partnerName: partner.Name,
+      percentage: partner['Split Percentage'] || 0,
+      amount: distributableProfit * ((partner['Split Percentage'] || 0) / 100),
+    }));
+
+  return {
+    netProfit,
+    commissionAmount,
+    distributableProfit,
+    splits,
+  };
+}
+
 export default {
   referralSources,
   commissionRules,
   commissions,
+  partners,
+  companySplits,
   contractorData,
   findMatchingRule,
   calculateCommission,
+  calculateCompanySplits,
 };

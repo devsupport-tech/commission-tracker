@@ -1,6 +1,7 @@
 # Commission Tracker - Project Handoff Document
 
 **Created:** March 18, 2026
+**Last Updated:** March 18, 2026
 **Repo:** https://github.com/devsupport-tech/commission-tracker
 **Local Path:** `C:\Users\steph\Projects\commission-tracker`
 
@@ -12,6 +13,7 @@ A commission splits and referral tracking dashboard for an estimating and restor
 - Referral sources (who sends work)
 - Commission rules (how commissions are calculated)
 - Commission payments (tracking what's owed and paid)
+- Company splits (partner profit distribution after commissions)
 - Job data synced from existing contractor Airtable bases
 
 ### Business Context
@@ -25,7 +27,18 @@ A commission splits and referral tracking dashboard for an estimating and restor
 
 ---
 
-## Architecture Decision
+## Key Decisions (Resolved)
+
+| Question | Decision |
+|----------|----------|
+| Company Splits needed? | **YES** - Partners split profit after commissions |
+| Multiple job types per claim? | Commission is **per-job based on referral**. Job type in rules determines the *rate*, but commission calculated on whole job, not per module |
+| Historical data? | **Manual backfill later** - start fresh for now |
+| Automation (n8n)? | **Not now** - React reads directly, add n8n later if needed |
+
+---
+
+## Architecture
 
 **Chosen Approach: Option 1 - No n8n (React reads directly from Airtable)**
 
@@ -72,15 +85,13 @@ Key fields for commission tracking:
 - `Module Type` - Mitigation, Rebuild, Packout, etc.
 - `Claim` - Link to Claims
 - `Vendor`, `Payment Amount`, `Status`
+- **Note:** Job type used for rate matching, but commission is per-job not per-module
 
 ### Payments Log Table
 - `Amount` - Cost/expense amount
 - `Claim` - Link to Claims
 - `Vendor`, `Status`, `Payment Date`
 - Used to calculate total costs for net profit commissions
-
-### Updates Log Table
-- Activity/audit trail (not needed for commissions)
 
 ---
 
@@ -138,36 +149,64 @@ Key fields for commission tracking:
 | Payment Reference | Text | Check #, etc. |
 | Notes | Long Text | |
 
+### Table 4: Partners
+| Field | Type | Notes |
+|-------|------|-------|
+| Partner ID | Auto Number | |
+| Name | Text | Partner name |
+| Role | Single Select | Owner, Partner, Investor |
+| Split Percentage | Number | e.g., 60 for 60% |
+| Email | Email | |
+| Phone | Phone | |
+| Active | Checkbox | |
+| Notes | Long Text | |
+
+### Table 5: Company Splits
+| Field | Type | Notes |
+|-------|------|-------|
+| Split ID | Auto Number | |
+| Job ID | Text | Reference to contractor base claim |
+| Date | Date | Date calculated |
+| Net Profit | Currency | Job's net profit |
+| Commission Deducted | Currency | Commission paid out |
+| Distributable Profit | Currency | Net Profit - Commissions |
+| Partner | Link | To Partners |
+| Partner Percentage | Number | % at time of split |
+| Split Amount | Currency | Partner's share |
+| Status | Single Select | Pending, Distributed |
+| Date Distributed | Date | |
+| Notes | Long Text | |
+
 ---
 
-## Commission Calculation Logic
+## Commission & Split Calculation Flow
 
 ```
-WHEN user clicks "Calculate Commission" for a job:
+WHEN user processes a completed job:
 
-1. Get Job's Referral Source
-2. Get Job's Module Types (from Modules table)
-3. Get Job's Total Costs (from Payments Log)
-4. Find matching Commission Rule:
-   - First: Exact source match + Job Type (Priority highest)
-   - Second: Source Type + Job Type
-   - Third: Source default rate
-   - Fourth: No commission (0%)
+1. GET JOB DATA
+   - Fetch job from contractor base (Claims table)
+   - Get Total Payout (revenue)
+   - Sum costs from Payments Log table
+   - Calculate Net Profit = Revenue - Costs
 
-5. Calculate commission:
-   IF basis = "Revenue Collected":
-      amount = Total Payout × rate%
-   ELSE IF basis = "Net Profit":
-      profit = Total Payout - Total Costs
-      amount = profit × rate%
-   ELSE IF basis = "Flat Rate":
-      amount = flat_amount
+2. CALCULATE COMMISSION (if referral exists)
+   - Get Referral Source from job
+   - Find matching Commission Rule (by priority)
+   - Calculate commission amount based on rule
+   - Create Commission record (status: Pending)
 
-6. Apply thresholds:
-   - Skip if below Min Threshold
-   - Cap at Max Commission if set
+3. CALCULATE COMPANY SPLITS
+   - Distributable Profit = Net Profit - Commission Amount
+   - For each active Partner:
+     - Split Amount = Distributable Profit × Partner %
+   - Create Company Split records (status: Pending)
 
-7. Create Commission record with status "Pending"
+4. MANUAL APPROVAL
+   - Review commission in Payments page
+   - Approve → Mark commission "Approved"
+   - Pay → Mark commission "Paid"
+   - Distribute → Mark company splits "Distributed"
 ```
 
 ---
@@ -177,10 +216,13 @@ WHEN user clicks "Calculate Commission" for a job:
 ### React Dashboard (Vite + Tailwind)
 
 **Pages:**
-- `/` - Overview (KPI cards, recent activity)
-- `/referral-sources` - CRUD for referral sources
-- `/commission-rules` - Configure calculation rules
-- `/payments` - Track commission payments
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | Overview | KPI cards, recent activity |
+| `/referral-sources` | Referral Sources | CRUD for referral sources |
+| `/commission-rules` | Commission Rules | Configure calculation rules |
+| `/payments` | Payments | Track commission payments |
+| `/company-splits` | Company Splits | Partner profit distribution |
 
 **Components:**
 - `Sidebar` - Dark purple nav matching Claims Master
@@ -190,9 +232,11 @@ WHEN user clicks "Calculate Commission" for a job:
 - `Button` - Primary, secondary, ghost variants
 
 **Services:**
-- `src/services/airtable.js` - Full Airtable API integration ready
-  - CRUD for all tables
-  - Commission calculation functions
+- `src/services/airtable.js` - Full Airtable API integration
+  - CRUD for Referral Sources, Commission Rules, Commissions
+  - CRUD for Partners, Company Splits
+  - Commission calculation function
+  - Company splits calculation function
   - Multi-base contractor data fetching
 
 **Design:**
@@ -239,11 +283,13 @@ VITE_CONTRACTOR_BASE_1=appXXXXXXXXXXXXXX
 - [ ] Create "Referral Sources" table with schema above
 - [ ] Create "Commission Rules" table with schema above
 - [ ] Create "Commissions" table with schema above
+- [ ] Create "Partners" table with schema above
+- [ ] Create "Company Splits" table with schema above
 - [ ] Copy Base ID to `.env`
 
 ### 2. Add Referral Source Field to Existing Claims Table
 - [ ] Add "Referral Source" field (Single Line Text or Link)
-- [ ] Backfill existing claims with referral sources if known
+- [ ] Backfill will be done manually later
 
 ### 3. Configure Environment
 - [ ] Create `.env` file from `.env.example`
@@ -255,17 +301,20 @@ VITE_CONTRACTOR_BASE_1=appXXXXXXXXXXXXXX
 - [ ] Replace mock data in ReferralSources.jsx
 - [ ] Replace mock data in CommissionRules.jsx
 - [ ] Replace mock data in Payments.jsx
+- [ ] Replace mock data in CompanySplits.jsx
 - [ ] Add loading states and error handling
 
 ### 5. Add CRUD Modals
 - [ ] Add Referral Source modal (create/edit)
 - [ ] Add Commission Rule modal (create/edit)
+- [ ] Add Partner modal (create/edit)
 - [ ] Add payment confirmation modal
 
 ### 6. Job Sync Feature
 - [ ] Build "Sync Jobs" button functionality
 - [ ] Show jobs ready for commission calculation
 - [ ] Allow assigning referral source to jobs
+- [ ] Calculate commission + splits together
 
 ### 7. Deploy to Coolify
 - [ ] Set up Coolify deployment
@@ -274,34 +323,76 @@ VITE_CONTRACTOR_BASE_1=appXXXXXXXXXXXXXX
 
 ---
 
-## Example Commission Scenarios
+## Example Scenarios
 
-### Scenario 1: Adjuster Referral - Mitigation
-- Referral: Mike Johnson (Adjuster)
-- Job Type: Mitigation
-- Revenue Collected: $8,000
+### Scenario 1: Full Flow - Adjuster Referral
+```
+Job: CLM-2024-005
+Referral: Mike Johnson (Adjuster)
+Job Type: Mitigation
+Revenue Collected: $10,000
+Total Costs: $6,000
+Net Profit: $4,000
+
+Commission Calculation:
 - Rule: Adjuster + Mitigation = 10% of Revenue
-- Commission: $800
+- Commission: $10,000 × 10% = $1,000
 
-### Scenario 2: Contractor Referral - Rebuild
-- Referral: ABC Contractors
-- Job Type: Rebuild
-- Revenue: $45,000
-- Costs: $30,000
-- Net Profit: $15,000
+Company Splits:
+- Distributable: $4,000 - $1,000 = $3,000
+- Partner A (60%): $1,800
+- Partner B (40%): $1,200
+```
+
+### Scenario 2: Net Profit Commission
+```
+Job: CLM-2024-006
+Referral: ABC Contractors
+Job Type: Rebuild
+Revenue: $45,000
+Costs: $30,000
+Net Profit: $15,000
+
+Commission Calculation:
 - Rule: Contractor = 8% of Net Profit
-- Commission: $1,200
+- Commission: $15,000 × 8% = $1,200
 
-### Scenario 3: Realtor Referral - Any Job
-- Referral: Sarah Miller (Realtor)
-- Job Type: Any
-- Revenue: $5,000 (above $2,500 min threshold)
-- Rule: Realtor = $500 Flat Rate
+Company Splits:
+- Distributable: $15,000 - $1,200 = $13,800
+- Partner A (60%): $8,280
+- Partner B (40%): $5,520
+```
+
+### Scenario 3: Flat Rate Commission
+```
+Job: CLM-2024-007
+Referral: Sarah Miller (Realtor)
+Revenue: $5,000
+Net Profit: $2,000
+
+Commission Calculation:
+- Rule: Realtor = $500 Flat (min threshold $2,500 revenue)
 - Commission: $500
 
+Company Splits:
+- Distributable: $2,000 - $500 = $1,500
+- Partner A (60%): $900
+- Partner B (40%): $600
+```
+
 ### Scenario 4: No Referral
-- Referral: None (cold call)
-- Commission: $0
+```
+Job: CLM-2024-008
+Referral: None (cold call)
+Net Profit: $5,000
+
+Commission: $0
+
+Company Splits:
+- Distributable: $5,000
+- Partner A (60%): $3,000
+- Partner B (40%): $2,000
+```
 
 ---
 
@@ -323,7 +414,8 @@ commission-tracker/
 │   │   ├── Overview.jsx
 │   │   ├── ReferralSources.jsx
 │   │   ├── CommissionRules.jsx
-│   │   └── Payments.jsx
+│   │   ├── Payments.jsx
+│   │   └── CompanySplits.jsx
 │   ├── services/
 │   │   └── airtable.js
 │   ├── App.jsx
@@ -354,18 +446,6 @@ npm run build
 # Preview production build
 npm run preview
 ```
-
----
-
-## Questions to Resolve
-
-1. **Company Splits** - Do you split profit between partners after commissions? If so, we need to add Company Splits table.
-
-2. **Multiple Job Types per Claim** - If a claim has both Mitigation and Rebuild modules, how should commission be calculated? Per module or on total?
-
-3. **Payment Triggers** - When should commission status change from Pending to Approved? When job is paid? When you manually approve?
-
-4. **Historical Data** - Do you want to backfill commissions for past jobs, or start fresh?
 
 ---
 

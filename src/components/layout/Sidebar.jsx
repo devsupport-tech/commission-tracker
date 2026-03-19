@@ -4,6 +4,7 @@ import {
   Users,
   FileText,
   CreditCard,
+  PieChart,
   RefreshCw,
   Search,
   DollarSign,
@@ -15,6 +16,7 @@ const navItems = [
   { to: '/referral-sources', icon: Users, label: 'Referral Sources' },
   { to: '/commission-rules', icon: FileText, label: 'Commission Rules' },
   { to: '/payments', icon: CreditCard, label: 'Payments' },
+  { to: '/company-splits', icon: PieChart, label: 'Company Splits' },
 ];
 
 export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
