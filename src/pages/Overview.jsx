@@ -2,25 +2,10 @@ import { DollarSign, TrendingUp, Receipt, Clock, Wallet, PieChart } from 'lucide
 import { StatsCard, Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '../components/ui/Table';
 import Badge from '../components/ui/Badge';
-
-// Mock data - will be replaced with Airtable data
-const mockStats = {
-  totalRevenue: 255000,
-  totalReceived: 147500,
-  outstanding: 67500,
-  grossProfit: 90500,
-  totalCosts: 211200,
-  commissionsOwed: 8500,
-  commissionsPaid: 12300,
-  pendingApproval: 3200,
-};
-
-const mockRecentActivity = [
-  { id: 1, date: '2024-05-31', type: 'Commission', source: 'Mike Johnson', job: 'CLM-2024-002', amount: 800, status: 'pending' },
-  { id: 2, date: '2024-05-30', type: 'Payment', source: 'ABC Contractors', job: 'CLM-2024-001', amount: 1200, status: 'paid' },
-  { id: 3, date: '2024-05-28', type: 'Commission', source: 'Sarah Miller', job: 'CLM-2024-003', amount: 650, status: 'approved' },
-  { id: 4, date: '2024-05-25', type: 'Payment', source: 'Mike Johnson', job: 'CLM-2024-001', amount: 500, status: 'paid' },
-];
+import LoadingState from '../components/ui/LoadingState';
+import ErrorState from '../components/ui/ErrorState';
+import EmptyState from '../components/ui/EmptyState';
+import { useCommissions, useJobs, useContractors, usePartners } from '../hooks/useAirtable';
 
 const typeColors = {
   Commission: 'purple',
@@ -28,12 +13,50 @@ const typeColors = {
 };
 
 const statusColors = {
-  pending: 'warning',
-  approved: 'info',
-  paid: 'success',
+  Pending: 'warning',
+  Approved: 'info',
+  Paid: 'success',
+  Disputed: 'danger',
 };
 
-export default function Overview() {
+export default function Overview({ contractorFilter }) {
+  const { data: contractorsList } = useContractors();
+  const { data: commissionsList, loading, error, refresh } = useCommissions();
+  const { jobs } = useJobs(contractorsList, contractorFilter);
+  const { data: partnersList } = usePartners();
+
+  const filteredCommissions = contractorFilter
+    ? commissionsList.filter(c => c['Contractor Name'] === contractorFilter)
+    : commissionsList;
+
+  // Calculate stats from live data
+  const totalRevenue = jobs.reduce((sum, j) => sum + (j['Total Payout'] || 0), 0);
+  const totalCosts = jobs.reduce((sum, j) => sum + (j.totalCosts || 0), 0);
+  const grossProfit = totalRevenue - totalCosts;
+  const commissionsOwed = filteredCommissions
+    .filter(c => c.Status === 'Pending' || c.Status === 'Approved')
+    .reduce((sum, c) => sum + (c['Commission Amount'] || 0), 0);
+  const commissionsPaid = filteredCommissions
+    .filter(c => c.Status === 'Paid')
+    .reduce((sum, c) => sum + (c['Commission Amount'] || 0), 0);
+  const pendingApproval = filteredCommissions
+    .filter(c => c.Status === 'Pending')
+    .reduce((sum, c) => sum + (c['Commission Amount'] || 0), 0);
+
+  // Recent activity from commissions
+  const recentActivity = filteredCommissions.slice(0, 10).map(c => ({
+    id: c.id,
+    date: c['Date Calculated'] || c['Date Paid'] || '',
+    type: c.Status === 'Paid' ? 'Payment' : 'Commission',
+    source: c['Referral Source Name'] || c['Referral Source'] || '—',
+    job: c['Job ID'] || '—',
+    amount: c['Commission Amount'] || 0,
+    status: c.Status || 'Pending',
+  }));
+
+  if (loading) return <LoadingState message="Loading overview..." />;
+  if (error) return <ErrorState message={error} onRetry={refresh} />;
+
   return (
     <div className="p-8">
       {/* Header */}
@@ -45,15 +68,15 @@ export default function Overview() {
       {/* Stats Bar */}
       <div className="flex items-center gap-4 mb-8 text-sm">
         <span className="text-gray-600">
-          <span className="font-semibold text-gray-900">12</span> total jobs
+          <span className="font-semibold text-gray-900">{jobs.length}</span> total jobs
         </span>
         <span className="text-gray-300">|</span>
         <span className="text-gray-600">
-          Commissions Owed: <span className="font-semibold text-orange-500">${mockStats.commissionsOwed.toLocaleString()}</span>
+          Commissions Owed: <span className="font-semibold text-orange-500">${commissionsOwed.toLocaleString()}</span>
         </span>
         <span className="text-gray-300">|</span>
         <span className="text-gray-600">
-          Pending Approval: <span className="font-semibold text-blue-500">${mockStats.pendingApproval.toLocaleString()}</span>
+          Pending Approval: <span className="font-semibold text-blue-500">${pendingApproval.toLocaleString()}</span>
         </span>
       </div>
 
@@ -61,49 +84,46 @@ export default function Overview() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <StatsCard
           title="Total Revenue"
-          value={`$${mockStats.totalRevenue.toLocaleString()}`}
-          subtitle={`ACV: $${(mockStats.totalRevenue * 0.85).toLocaleString()}`}
+          value={`$${totalRevenue.toLocaleString()}`}
+          subtitle={`${jobs.length} jobs`}
           icon={DollarSign}
         />
         <StatsCard
-          title="Total Received"
-          value={`$${mockStats.totalReceived.toLocaleString()}`}
-          subtitle="All inflows across jobs"
+          title="Gross Profit"
+          value={`$${grossProfit.toLocaleString()}`}
+          subtitle={totalRevenue > 0 ? `Margin: ${((grossProfit / totalRevenue) * 100).toFixed(1)}%` : '—'}
           icon={TrendingUp}
           variant="success"
-          trend="up"
         />
         <StatsCard
-          title="Outstanding"
-          value={`$${mockStats.outstanding.toLocaleString()}`}
-          subtitle="Remaining to collect"
+          title="Total Costs"
+          value={`$${totalCosts.toLocaleString()}`}
+          subtitle="Across all jobs"
           icon={Clock}
-          variant="danger"
-          trend="down"
         />
       </div>
 
       {/* Stats Cards - Row 2 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <StatsCard
-          title="Gross Profit"
-          value={`$${mockStats.grossProfit.toLocaleString()}`}
-          subtitle={`Margin: ${((mockStats.grossProfit / mockStats.totalRevenue) * 100).toFixed(1)}%`}
+          title="Commissions Owed"
+          value={`$${commissionsOwed.toLocaleString()}`}
+          subtitle="Pending + Approved"
           icon={Wallet}
-          variant="success"
-        />
-        <StatsCard
-          title="Total Costs"
-          value={`$${mockStats.totalCosts.toLocaleString()}`}
-          subtitle={`Actual: $${(mockStats.totalCosts * 0.68).toLocaleString()}`}
-          icon={Receipt}
+          variant="warning"
         />
         <StatsCard
           title="Commissions Paid"
-          value={`$${mockStats.commissionsPaid.toLocaleString()}`}
+          value={`$${commissionsPaid.toLocaleString()}`}
           subtitle="YTD commission payouts"
-          icon={PieChart}
+          icon={Receipt}
           variant="success"
+        />
+        <StatsCard
+          title="Partners"
+          value={partnersList.filter(p => p.Active).length}
+          subtitle="Active partners"
+          icon={PieChart}
         />
       </div>
 
@@ -113,40 +133,44 @@ export default function Overview() {
           <CardTitle icon={Receipt}>Recent Commission Activity</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableHead>Date</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Referral Source</TableHead>
-              <TableHead>Job</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-            </TableHeader>
-            <TableBody>
-              {mockRecentActivity.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>{item.date}</TableCell>
-                  <TableCell>
-                    <Badge variant={typeColors[item.type]}>{item.type}</Badge>
-                  </TableCell>
-                  <TableCell className="font-medium text-gray-900">{item.source}</TableCell>
-                  <TableCell>
-                    <span className="text-purple-600 hover:underline cursor-pointer">
-                      {item.job}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusColors[item.status]}>
-                      {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-semibold">
-                    ${item.amount.toLocaleString()}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {recentActivity.length === 0 ? (
+            <EmptyState title="No commission activity yet" description="Commissions will appear here once jobs are processed" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableHead>Date</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Referral Source</TableHead>
+                <TableHead>Job</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+              </TableHeader>
+              <TableBody>
+                {recentActivity.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{item.date}</TableCell>
+                    <TableCell>
+                      <Badge variant={typeColors[item.type]}>{item.type}</Badge>
+                    </TableCell>
+                    <TableCell className="font-medium text-gray-900">{item.source}</TableCell>
+                    <TableCell>
+                      <span className="text-purple-600 hover:underline cursor-pointer">
+                        {item.job}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={statusColors[item.status]}>
+                        {item.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      ${item.amount.toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

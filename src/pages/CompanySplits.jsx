@@ -1,100 +1,117 @@
 import { useState } from 'react';
-import { Plus, Search, Users, Percent, DollarSign, Edit2, Trash2 } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent, StatsCard } from '../components/ui/Card';
+import { Plus, Search, Users, Percent, DollarSign } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '../components/ui/Table';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
-
-// Mock data - will be replaced with Airtable data
-const mockPartners = [
-  {
-    id: 1,
-    name: 'Partner A',
-    role: 'Owner',
-    splitPercentage: 60,
-    active: true,
-  },
-  {
-    id: 2,
-    name: 'Partner B',
-    role: 'Partner',
-    splitPercentage: 40,
-    active: true,
-  },
-];
-
-const mockSplitHistory = [
-  {
-    id: 1,
-    date: '2024-05-31',
-    job: 'CLM-2024-002',
-    jobAddress: '123 Main St, Austin, TX',
-    netProfit: 8500,
-    commissionsDeducted: 850,
-    distributableProfit: 7650,
-    splits: [
-      { partner: 'Partner A', percentage: 60, amount: 4590 },
-      { partner: 'Partner B', percentage: 40, amount: 3060 },
-    ],
-    status: 'distributed',
-  },
-  {
-    id: 2,
-    date: '2024-05-28',
-    job: 'CLM-2024-001',
-    jobAddress: '456 Oak Ave, Dallas, TX',
-    netProfit: 15000,
-    commissionsDeducted: 1200,
-    distributableProfit: 13800,
-    splits: [
-      { partner: 'Partner A', percentage: 60, amount: 8280 },
-      { partner: 'Partner B', percentage: 40, amount: 5520 },
-    ],
-    status: 'distributed',
-  },
-  {
-    id: 3,
-    date: '2024-05-25',
-    job: 'CLM-2024-003',
-    jobAddress: '789 Pine Rd, Houston, TX',
-    netProfit: 5200,
-    commissionsDeducted: 500,
-    distributableProfit: 4700,
-    splits: [
-      { partner: 'Partner A', percentage: 60, amount: 2820 },
-      { partner: 'Partner B', percentage: 40, amount: 1880 },
-    ],
-    status: 'pending',
-  },
-];
+import Modal from '../components/ui/Modal';
+import LoadingState from '../components/ui/LoadingState';
+import ErrorState from '../components/ui/ErrorState';
+import EmptyState from '../components/ui/EmptyState';
+import { usePartners, useCompanySplits } from '../hooks/useAirtable';
 
 const statusColors = {
+  Pending: 'warning',
+  Distributed: 'success',
   pending: 'warning',
   distributed: 'success',
 };
 
+const emptyPartnerForm = {
+  Name: '',
+  Role: 'Partner',
+  'Split Percentage': '',
+  Email: '',
+  Phone: '',
+  Active: true,
+  Notes: '',
+};
+
 export default function CompanySplits() {
+  const { data: partnersList, loading: partnersLoading, error: partnersError, refresh: refreshPartners, create: createPartner, update: updatePartner, remove: removePartner } = usePartners();
+  const { data: splitHistory, loading: splitsLoading, error: splitsError, refresh: refreshSplits, markDistributed } = useCompanySplits();
   const [searchTerm, setSearchTerm] = useState('');
-  const [showPartnerModal, setShowPartnerModal] = useState(false);
+  const [partnerModalOpen, setPartnerModalOpen] = useState(false);
+  const [editingPartner, setEditingPartner] = useState(null);
+  const [partnerForm, setPartnerForm] = useState(emptyPartnerForm);
+  const [saving, setSaving] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  // Calculate totals
-  const totalDistributed = mockSplitHistory
-    .filter(s => s.status === 'distributed')
-    .reduce((sum, s) => sum + s.distributableProfit, 0);
+  const loading = partnersLoading || splitsLoading;
+  const error = partnersError || splitsError;
 
-  const totalPending = mockSplitHistory
-    .filter(s => s.status === 'pending')
-    .reduce((sum, s) => sum + s.distributableProfit, 0);
+  const totalDistributed = splitHistory
+    .filter(s => (s.Status || '').toLowerCase() === 'distributed')
+    .reduce((sum, s) => sum + (s['Distributable Profit'] || 0), 0);
 
-  const partnerTotals = mockPartners.map(partner => {
-    const total = mockSplitHistory
-      .filter(s => s.status === 'distributed')
+  const totalPending = splitHistory
+    .filter(s => (s.Status || '').toLowerCase() === 'pending')
+    .reduce((sum, s) => sum + (s['Distributable Profit'] || 0), 0);
+
+  const partnerTotals = partnersList.map(partner => {
+    const total = splitHistory
+      .filter(s => (s.Status || '').toLowerCase() === 'distributed')
       .reduce((sum, split) => {
-        const partnerSplit = split.splits.find(s => s.partner === partner.name);
-        return sum + (partnerSplit?.amount || 0);
+        if (split['Partner'] === partner.Name || split['Partner']?.[0] === partner.id) {
+          return sum + (split['Split Amount'] || 0);
+        }
+        return sum;
       }, 0);
     return { ...partner, totalEarned: total };
   });
+
+  const openAddPartner = () => {
+    setEditingPartner(null);
+    setPartnerForm(emptyPartnerForm);
+    setPartnerModalOpen(true);
+  };
+
+  const openEditPartner = (partner) => {
+    setEditingPartner(partner);
+    setPartnerForm({
+      Name: partner.Name || '',
+      Role: partner.Role || 'Partner',
+      'Split Percentage': partner['Split Percentage'] || '',
+      Email: partner.Email || '',
+      Phone: partner.Phone || '',
+      Active: partner.Active !== false,
+      Notes: partner.Notes || '',
+    });
+    setPartnerModalOpen(true);
+  };
+
+  const handleSavePartner = async () => {
+    setSaving(true);
+    try {
+      const fields = { ...partnerForm };
+      if (fields['Split Percentage']) fields['Split Percentage'] = Number(fields['Split Percentage']);
+
+      if (editingPartner) {
+        await updatePartner(editingPartner.id, fields);
+      } else {
+        await createPartner(fields);
+      }
+      setPartnerModalOpen(false);
+    } catch (err) {
+      alert('Error saving partner: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDistribute = async (id) => {
+    setProcessing(true);
+    try {
+      await markDistributed(id);
+    } catch (err) {
+      alert('Error distributing: ' + err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  if (loading) return <LoadingState message="Loading company splits..." />;
+  if (error) return <ErrorState message={error} onRetry={() => { refreshPartners(); refreshSplits(); }} />;
 
   return (
     <div className="p-8">
@@ -104,26 +121,28 @@ export default function CompanySplits() {
           <h1 className="text-2xl font-bold text-gray-900">Company Splits</h1>
           <p className="text-gray-500 mt-1">Partner profit distribution after commissions</p>
         </div>
-        <Button icon={Plus} onClick={() => setShowPartnerModal(true)}>
-          Manage Partners
-        </Button>
+        <Button icon={Plus} onClick={openAddPartner}>Manage Partners</Button>
       </div>
 
       {/* Partner Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {partnerTotals.map(partner => (
-          <Card key={partner.id} className="p-4">
+          <Card
+            key={partner.id}
+            className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => openEditPartner(partner)}
+          >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
                   <Users className="w-5 h-5 text-purple-600" />
                 </div>
                 <div>
-                  <div className="font-medium text-gray-900">{partner.name}</div>
-                  <div className="text-sm text-gray-500">{partner.role}</div>
+                  <div className="font-medium text-gray-900">{partner.Name}</div>
+                  <div className="text-sm text-gray-500">{partner.Role}</div>
                 </div>
               </div>
-              <Badge variant="info">{partner.splitPercentage}%</Badge>
+              <Badge variant="info">{partner['Split Percentage']}%</Badge>
             </div>
             <div className="text-2xl font-semibold text-green-600">
               ${partner.totalEarned.toLocaleString()}
@@ -132,7 +151,6 @@ export default function CompanySplits() {
           </Card>
         ))}
 
-        {/* Summary Cards */}
         <Card className="p-4 bg-green-50 border-green-200">
           <div className="flex items-center gap-2 mb-2">
             <DollarSign className="w-5 h-5 text-green-600" />
@@ -162,7 +180,7 @@ export default function CompanySplits() {
               <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
               <span className="text-gray-600">Net Profit</span>
             </div>
-            <span className="text-gray-400">−</span>
+            <span className="text-gray-400">-</span>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
               <span className="text-gray-600">Commissions Paid</span>
@@ -172,7 +190,7 @@ export default function CompanySplits() {
               <div className="w-3 h-3 bg-green-500 rounded-full"></div>
               <span className="text-gray-600 font-medium">Distributable Profit</span>
             </div>
-            <span className="text-gray-400">→</span>
+            <span className="text-gray-400">-&gt;</span>
             <span className="text-gray-600">Split by Partner %</span>
           </div>
         </CardContent>
@@ -198,68 +216,166 @@ export default function CompanySplits() {
           <CardTitle icon={Percent}>Split History</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableHead>Date</TableHead>
-              <TableHead>Job</TableHead>
-              <TableHead className="text-right">Net Profit</TableHead>
-              <TableHead className="text-right">Commissions</TableHead>
-              <TableHead className="text-right">Distributable</TableHead>
-              <TableHead>Splits</TableHead>
-              <TableHead className="text-center">Status</TableHead>
-              <TableHead></TableHead>
-            </TableHeader>
-            <TableBody>
-              {mockSplitHistory.map((split) => (
-                <TableRow key={split.id}>
-                  <TableCell className="text-gray-500">{split.date}</TableCell>
-                  <TableCell>
-                    <div>
-                      <span className="text-purple-600 hover:underline cursor-pointer font-medium">
-                        {split.job}
-                      </span>
-                      <div className="text-sm text-gray-500 truncate max-w-[200px]">
-                        {split.jobAddress}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    ${split.netProfit.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right text-red-500">
-                    -${split.commissionsDeducted.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right font-semibold text-green-600">
-                    ${split.distributableProfit.toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      {split.splits.map((s, idx) => (
-                        <div key={idx} className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">{s.partner}:</span>
-                          <span className="font-medium">${s.amount.toLocaleString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={statusColors[split.status]}>
-                      {split.status.charAt(0).toUpperCase() + split.status.slice(1)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {split.status === 'pending' && (
-                      <Button size="sm" variant="success">
-                        Distribute
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {splitHistory.length === 0 ? (
+            <EmptyState title="No splits yet" description="Company splits will appear here once commissions are processed" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableHead>Date</TableHead>
+                <TableHead>Job</TableHead>
+                <TableHead className="text-right">Net Profit</TableHead>
+                <TableHead className="text-right">Commissions</TableHead>
+                <TableHead className="text-right">Distributable</TableHead>
+                <TableHead>Partner</TableHead>
+                <TableHead className="text-right">Split Amount</TableHead>
+                <TableHead className="text-center">Status</TableHead>
+                <TableHead></TableHead>
+              </TableHeader>
+              <TableBody>
+                {splitHistory.map((split) => {
+                  const statusKey = split.Status || 'Pending';
+                  return (
+                    <TableRow key={split.id}>
+                      <TableCell className="text-gray-500">{split.Date}</TableCell>
+                      <TableCell>
+                        <span className="text-purple-600 hover:underline cursor-pointer font-medium">
+                          {split['Job ID'] || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        ${(split['Net Profit'] || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right text-red-500">
+                        -${(split['Commission Deducted'] || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-green-600">
+                        ${(split['Distributable Profit'] || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-medium text-gray-900">
+                        {split['Partner Name'] || split.Partner || '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        ${(split['Split Amount'] || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={statusColors[statusKey] || 'warning'}>
+                          {statusKey.charAt(0).toUpperCase() + statusKey.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {(statusKey || '').toLowerCase() === 'pending' && (
+                          <Button size="sm" variant="success" onClick={() => handleDistribute(split.id)} disabled={processing}>
+                            Distribute
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
+
+      {/* Partner Modal */}
+      <Modal open={partnerModalOpen} onClose={() => setPartnerModalOpen(false)} title={editingPartner ? 'Edit Partner' : 'Add Partner'}>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input
+              type="text"
+              value={partnerForm.Name}
+              onChange={e => setPartnerForm({ ...partnerForm, Name: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <select
+                value={partnerForm.Role}
+                onChange={e => setPartnerForm({ ...partnerForm, Role: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                {['Owner', 'Partner', 'Investor'].map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Split Percentage (%)</label>
+              <input
+                type="number"
+                value={partnerForm['Split Percentage']}
+                onChange={e => setPartnerForm({ ...partnerForm, 'Split Percentage': e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={partnerForm.Email}
+                onChange={e => setPartnerForm({ ...partnerForm, Email: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+              <input
+                type="text"
+                value={partnerForm.Phone}
+                onChange={e => setPartnerForm({ ...partnerForm, Phone: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              value={partnerForm.Notes}
+              onChange={e => setPartnerForm({ ...partnerForm, Notes: e.target.value })}
+              rows={2}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="partnerActive"
+              checked={partnerForm.Active}
+              onChange={e => setPartnerForm({ ...partnerForm, Active: e.target.checked })}
+              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+            />
+            <label htmlFor="partnerActive" className="text-sm text-gray-700">Active</label>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <Button variant="secondary" onClick={() => setPartnerModalOpen(false)}>Cancel</Button>
+            {editingPartner && (
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  if (!confirm(`Delete partner "${editingPartner.Name}"?`)) return;
+                  try {
+                    await removePartner(editingPartner.id);
+                    setPartnerModalOpen(false);
+                  } catch (err) {
+                    alert('Error: ' + err.message);
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            )}
+            <Button onClick={handleSavePartner} disabled={saving || !partnerForm.Name}>
+              {saving ? 'Saving...' : editingPartner ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

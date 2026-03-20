@@ -1,90 +1,107 @@
-import { useState } from 'react';
-import { Search, Filter, Download, CheckCircle, Clock, XCircle } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { useState, useEffect, useCallback } from 'react';
+import { Search, Download, CheckCircle, Clock, XCircle, FileText } from 'lucide-react';
+import { Card, CardContent } from '../components/ui/Card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '../components/ui/Table';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
-
-// Mock data - will be replaced with Airtable data
-const mockPayments = [
-  {
-    id: 1,
-    date: '2024-05-31',
-    source: 'Mike Johnson',
-    job: 'CLM-2024-002',
-    jobAddress: '123 Main St, Austin, TX',
-    basisAmount: 8500,
-    commissionBasis: 'Revenue Collected',
-    rate: '10%',
-    amount: 850,
-    status: 'pending',
-    paidDate: null,
-  },
-  {
-    id: 2,
-    date: '2024-05-30',
-    source: 'ABC Contractors',
-    job: 'CLM-2024-001',
-    jobAddress: '456 Oak Ave, Dallas, TX',
-    basisAmount: 15000,
-    commissionBasis: 'Net Profit',
-    rate: '8%',
-    amount: 1200,
-    status: 'approved',
-    paidDate: null,
-  },
-  {
-    id: 3,
-    date: '2024-05-25',
-    source: 'Sarah Miller',
-    job: 'CLM-2024-003',
-    jobAddress: '789 Pine Rd, Houston, TX',
-    basisAmount: 5000,
-    commissionBasis: 'Flat Rate',
-    rate: '$500',
-    amount: 500,
-    status: 'paid',
-    paidDate: '2024-05-28',
-  },
-  {
-    id: 4,
-    date: '2024-05-20',
-    source: 'Mike Johnson',
-    job: 'CLM-2024-001',
-    jobAddress: '456 Oak Ave, Dallas, TX',
-    basisAmount: 12000,
-    commissionBasis: 'Revenue Collected',
-    rate: '10%',
-    amount: 1200,
-    status: 'paid',
-    paidDate: '2024-05-22',
-  },
-];
+import Modal from '../components/ui/Modal';
+import LoadingState from '../components/ui/LoadingState';
+import ErrorState from '../components/ui/ErrorState';
+import EmptyState from '../components/ui/EmptyState';
+import { useCommissions, useCompanySplits, useContractors } from '../hooks/useAirtable';
+import { contractorData } from '../services/airtable';
+import { generateHandoffPDF } from '../utils/handoffDocument';
 
 const statusConfig = {
-  pending: { color: 'warning', icon: Clock, label: 'Pending' },
-  approved: { color: 'info', icon: CheckCircle, label: 'Approved' },
-  paid: { color: 'success', icon: CheckCircle, label: 'Paid' },
-  disputed: { color: 'danger', icon: XCircle, label: 'Disputed' },
+  Pending: { color: 'warning', icon: Clock, label: 'Pending' },
+  Approved: { color: 'info', icon: CheckCircle, label: 'Approved' },
+  Paid: { color: 'success', icon: CheckCircle, label: 'Paid' },
+  Disputed: { color: 'danger', icon: XCircle, label: 'Disputed' },
 };
 
 export default function Payments() {
+  const { data: payments, loading, error, refresh, markApproved, markPaid } = useCommissions();
+  const { data: splits } = useCompanySplits();
+  const { data: contractorsList } = useContractors();
+  const [jobs, setJobs] = useState([]);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payingId, setPayingId] = useState(null);
+  const [payForm, setPayForm] = useState({ method: 'Check', reference: '' });
+  const [processing, setProcessing] = useState(false);
 
-  const filteredPayments = mockPayments.filter(payment => {
-    const matchesFilter = filter === 'all' || payment.status === filter;
+  const filteredPayments = payments.filter(payment => {
+    const status = payment.Status || 'Pending';
+    const matchesFilter = filter === 'all' || status === filter;
+    const source = payment['Referral Source Name'] || payment['Referral Source'] || '';
+    const job = payment['Job ID'] || '';
     const matchesSearch =
-      payment.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.job.toLowerCase().includes(searchTerm.toLowerCase());
+      source.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      job.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
   const totals = {
-    pending: mockPayments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0),
-    approved: mockPayments.filter(p => p.status === 'approved').reduce((sum, p) => sum + p.amount, 0),
-    paid: mockPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0),
+    pending: payments.filter(p => p.Status === 'Pending').reduce((sum, p) => sum + (p['Commission Amount'] || 0), 0),
+    approved: payments.filter(p => p.Status === 'Approved').reduce((sum, p) => sum + (p['Commission Amount'] || 0), 0),
+    paid: payments.filter(p => p.Status === 'Paid').reduce((sum, p) => sum + (p['Commission Amount'] || 0), 0),
   };
+
+  // Fetch jobs in background for PDF handoff data
+  const fetchJobs = useCallback(async () => {
+    if (contractorsList.length === 0) return;
+    try {
+      const allJobs = await contractorData.fetchAllJobs(contractorsList);
+      setJobs(allJobs);
+    } catch (err) {
+      console.error('Failed to fetch jobs for handoff:', err);
+    }
+  }, [contractorsList]);
+
+  useEffect(() => {
+    if (contractorsList.length > 0 && jobs.length === 0) {
+      fetchJobs();
+    }
+  }, [contractorsList, jobs.length, fetchJobs]);
+
+  const handleHandoff = (payment) => {
+    const jobSplits = splits.filter(s => s['Job ID'] === payment['Job ID']);
+    const job = jobs.find(j => (j['Claim ID'] || j.id) === payment['Job ID']);
+    generateHandoffPDF(payment, { splits: jobSplits, job });
+  };
+
+  const handleApprove = async (id) => {
+    setProcessing(true);
+    try {
+      await markApproved(id);
+    } catch (err) {
+      alert('Error approving: ' + err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openPayModal = (id) => {
+    setPayingId(id);
+    setPayForm({ method: 'Check', reference: '' });
+    setPayModalOpen(true);
+  };
+
+  const handleMarkPaid = async () => {
+    setProcessing(true);
+    try {
+      await markPaid(payingId, payForm);
+      setPayModalOpen(false);
+    } catch (err) {
+      alert('Error marking paid: ' + err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  if (loading) return <LoadingState message="Loading commission payments..." />;
+  if (error) return <ErrorState message={error} onRetry={refresh} />;
 
   return (
     <div className="p-8">
@@ -94,66 +111,50 @@ export default function Payments() {
           <h1 className="text-2xl font-bold text-gray-900">Commission Payments</h1>
           <p className="text-gray-500 mt-1">Track and manage commission payouts</p>
         </div>
-        <Button icon={Download} variant="secondary">
-          Export
-        </Button>
+        <Button icon={Download} variant="secondary">Export</Button>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <button
-          onClick={() => setFilter(filter === 'pending' ? 'all' : 'pending')}
+          onClick={() => setFilter(filter === 'Pending' ? 'all' : 'Pending')}
           className={`p-4 rounded-xl border text-left transition-all ${
-            filter === 'pending'
-              ? 'border-orange-300 bg-orange-50'
-              : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'Pending' ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-white hover:border-gray-300'
           }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-500">Pending</span>
             <Clock className="w-4 h-4 text-orange-500" />
           </div>
-          <p className="text-2xl font-semibold text-orange-500 mt-1">
-            ${totals.pending.toLocaleString()}
-          </p>
+          <p className="text-2xl font-semibold text-orange-500 mt-1">${totals.pending.toLocaleString()}</p>
         </button>
-
         <button
-          onClick={() => setFilter(filter === 'approved' ? 'all' : 'approved')}
+          onClick={() => setFilter(filter === 'Approved' ? 'all' : 'Approved')}
           className={`p-4 rounded-xl border text-left transition-all ${
-            filter === 'approved'
-              ? 'border-blue-300 bg-blue-50'
-              : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'Approved' ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
           }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-500">Approved</span>
             <CheckCircle className="w-4 h-4 text-blue-500" />
           </div>
-          <p className="text-2xl font-semibold text-blue-500 mt-1">
-            ${totals.approved.toLocaleString()}
-          </p>
+          <p className="text-2xl font-semibold text-blue-500 mt-1">${totals.approved.toLocaleString()}</p>
         </button>
-
         <button
-          onClick={() => setFilter(filter === 'paid' ? 'all' : 'paid')}
+          onClick={() => setFilter(filter === 'Paid' ? 'all' : 'Paid')}
           className={`p-4 rounded-xl border text-left transition-all ${
-            filter === 'paid'
-              ? 'border-green-300 bg-green-50'
-              : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'Paid' ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'
           }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-500">Paid (YTD)</span>
             <CheckCircle className="w-4 h-4 text-green-500" />
           </div>
-          <p className="text-2xl font-semibold text-green-500 mt-1">
-            ${totals.paid.toLocaleString()}
-          </p>
+          <p className="text-2xl font-semibold text-green-500 mt-1">${totals.paid.toLocaleString()}</p>
         </button>
       </div>
 
-      {/* Search and Filter */}
+      {/* Search */}
       <div className="flex items-center gap-4 mb-6">
         <div className="relative flex-1 max-w-md">
           <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -166,85 +167,123 @@ export default function Payments() {
           />
         </div>
         {filter !== 'all' && (
-          <Button variant="ghost" onClick={() => setFilter('all')}>
-            Clear filter
-          </Button>
+          <Button variant="ghost" onClick={() => setFilter('all')}>Clear filter</Button>
         )}
       </div>
 
       {/* Table */}
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableHead>Date</TableHead>
-              <TableHead>Referral Source</TableHead>
-              <TableHead>Job</TableHead>
-              <TableHead>Basis</TableHead>
-              <TableHead>Rate</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead className="text-center">Status</TableHead>
-              <TableHead></TableHead>
-            </TableHeader>
-            <TableBody>
-              {filteredPayments.map((payment) => {
-                const status = statusConfig[payment.status];
-                return (
-                  <TableRow key={payment.id}>
-                    <TableCell className="text-gray-500">{payment.date}</TableCell>
-                    <TableCell className="font-medium text-gray-900">
-                      {payment.source}
-                    </TableCell>
-                    <TableCell>
-                      <div>
+          {filteredPayments.length === 0 ? (
+            <EmptyState title="No commissions found" description={filter !== 'all' ? 'Try clearing the filter' : 'Commissions will appear here once jobs are processed'} />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableHead>Date</TableHead>
+                <TableHead>Referral Source</TableHead>
+                <TableHead>Job</TableHead>
+                <TableHead>Basis</TableHead>
+                <TableHead>Rate</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-center">Status</TableHead>
+                <TableHead className="text-center">Handoff</TableHead>
+                <TableHead></TableHead>
+              </TableHeader>
+              <TableBody>
+                {filteredPayments.map((payment) => {
+                  const status = statusConfig[payment.Status] || statusConfig.Pending;
+                  return (
+                    <TableRow key={payment.id}>
+                      <TableCell className="text-gray-500">{payment['Date Calculated']}</TableCell>
+                      <TableCell className="font-medium text-gray-900">
+                        {payment['Referral Source Name'] || payment['Referral Source'] || '—'}
+                      </TableCell>
+                      <TableCell>
                         <span className="text-purple-600 hover:underline cursor-pointer">
-                          {payment.job}
+                          {payment['Job ID'] || '—'}
                         </span>
-                        <div className="text-sm text-gray-500 truncate max-w-[200px]">
-                          {payment.jobAddress}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            ${(payment['Basis Amount'] || 0).toLocaleString()}
+                          </div>
+                          <div className="text-sm text-gray-500">{payment['Commission Basis']}</div>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          ${payment.basisAmount.toLocaleString()}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {payment.commissionBasis}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{payment.rate}</TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-semibold text-gray-900">
-                        ${payment.amount.toLocaleString()}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Badge variant={status.color} icon={status.icon}>
-                        {status.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {payment.status === 'pending' && (
-                        <Button size="sm" variant="success">
-                          Approve
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {payment['Rate Applied'] ? (
+                          payment['Commission Basis'] === 'Flat Rate'
+                            ? `$${payment['Rate Applied']}`
+                            : `${payment['Rate Applied']}%`
+                        ) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-semibold text-gray-900">
+                          ${(payment['Commission Amount'] || 0).toLocaleString()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={status.color} icon={status.icon}>{status.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button size="sm" variant="secondary" icon={FileText} onClick={() => handleHandoff(payment)}>
+                          PDF
                         </Button>
-                      )}
-                      {payment.status === 'approved' && (
-                        <Button size="sm" variant="primary">
-                          Mark Paid
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell>
+                        {payment.Status === 'Pending' && (
+                          <Button size="sm" variant="success" onClick={() => handleApprove(payment.id)} disabled={processing}>
+                            Approve
+                          </Button>
+                        )}
+                        {payment.Status === 'Approved' && (
+                          <Button size="sm" variant="primary" onClick={() => openPayModal(payment.id)} disabled={processing}>
+                            Mark Paid
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
+
+      {/* Mark Paid Modal */}
+      <Modal open={payModalOpen} onClose={() => setPayModalOpen(false)} title="Mark Commission as Paid">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+            <select
+              value={payForm.method}
+              onChange={e => setPayForm({ ...payForm, method: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {['Check', 'ACH', 'Cash'].map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reference # (check number, etc.)</label>
+            <input
+              type="text"
+              value={payForm.reference}
+              onChange={e => setPayForm({ ...payForm, reference: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <Button variant="secondary" onClick={() => setPayModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleMarkPaid} disabled={processing}>
+              {processing ? 'Processing...' : 'Confirm Payment'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

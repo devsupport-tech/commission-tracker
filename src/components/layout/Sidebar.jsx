@@ -2,24 +2,33 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Users,
-  FileText,
   CreditCard,
   PieChart,
   RefreshCw,
   Search,
   DollarSign,
-  ExternalLink
+  Building,
+  Filter,
+  Briefcase,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Overview' },
+  { to: '/contractors', icon: Building, label: 'Contractors' },
+  { to: '/jobs', icon: Briefcase, label: 'Jobs' },
   { to: '/referral-sources', icon: Users, label: 'Referral Sources' },
-  { to: '/commission-rules', icon: FileText, label: 'Commission Rules' },
   { to: '/payments', icon: CreditCard, label: 'Payments' },
   { to: '/company-splits', icon: PieChart, label: 'Company Splits' },
 ];
 
-export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
+export default function Sidebar({
+  pendingCommissions = [],
+  onSync,
+  syncing,
+  contractors = [],
+  contractorFilter,
+  onContractorFilterChange,
+}) {
   return (
     <aside className="w-64 bg-[#1e1e2d] min-h-screen flex flex-col text-gray-300">
       {/* Logo */}
@@ -30,12 +39,33 @@ export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
         <span className="text-white font-semibold text-lg">Commission Tracker</span>
       </div>
 
+      {/* Contractor Filter */}
+      {contractors.length > 0 && (
+        <div className="px-3 mb-2">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider px-3 mb-2">
+            <Filter className="w-3 h-3 inline mr-1" />
+            Contractor
+          </div>
+          <select
+            value={contractorFilter}
+            onChange={(e) => onContractorFilterChange(e.target.value)}
+            className="w-full bg-[#2d2d3a] border-none rounded-lg py-2 px-3 text-sm text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="">All Contractors</option>
+            {contractors.filter(c => c.Active !== false).map((c) => (
+              <option key={c.id} value={c.Name}>{c.Name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Main Nav */}
       <nav className="mt-2 px-3">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            end={item.to === '/'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 transition-colors ${
                 isActive
@@ -46,7 +76,6 @@ export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
           >
             <item.icon className="w-5 h-5" />
             <span>{item.label}</span>
-            {item.external && <ExternalLink className="w-3 h-3 ml-auto opacity-50" />}
           </NavLink>
         ))}
       </nav>
@@ -56,17 +85,6 @@ export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider px-3 mb-2">
           Pending Commissions
         </div>
-        <div className="px-3 mb-2">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="w-full bg-[#2d2d3a] border-none rounded-lg py-2 pl-9 pr-3 text-sm text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-        </div>
-
         <div className="space-y-1 max-h-64 overflow-y-auto">
           {pendingCommissions.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500">
@@ -76,7 +94,7 @@ export default function Sidebar({ pendingCommissions = [], onSync, syncing }) {
             pendingCommissions.map((commission) => (
               <NavLink
                 key={commission.id}
-                to={`/commissions/${commission.id}`}
+                to="/payments"
                 className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#2d2d3a] group"
               >
                 <span className="text-sm text-gray-400 group-hover:text-white truncate">

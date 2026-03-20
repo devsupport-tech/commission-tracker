@@ -2,21 +2,25 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import Overview from './pages/Overview';
 import ReferralSources from './pages/ReferralSources';
-import CommissionRules from './pages/CommissionRules';
 import Payments from './pages/Payments';
 import CompanySplits from './pages/CompanySplits';
+import Contractors from './pages/Contractors';
+import Jobs from './pages/Jobs';
 
 function App() {
   return (
     <BrowserRouter>
       <Layout>
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/referral-sources" element={<ReferralSources />} />
-          <Route path="/commission-rules" element={<CommissionRules />} />
-          <Route path="/payments" element={<Payments />} />
-          <Route path="/company-splits" element={<CompanySplits />} />
-        </Routes>
+        {(contractorFilter) => (
+          <Routes>
+            <Route path="/" element={<Overview contractorFilter={contractorFilter} />} />
+            <Route path="/referral-sources" element={<ReferralSources />} />
+            <Route path="/payments" element={<Payments />} />
+            <Route path="/company-splits" element={<CompanySplits />} />
+            <Route path="/contractors" element={<Contractors />} />
+            <Route path="/jobs" element={<Jobs contractorFilter={contractorFilter} />} />
+          </Routes>
+        )}
       </Layout>
     </BrowserRouter>
   );
