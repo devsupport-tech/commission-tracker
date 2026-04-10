@@ -7,8 +7,8 @@ import Button from '../components/ui/Button';
 import LoadingState from '../components/ui/LoadingState';
 import ErrorState from '../components/ui/ErrorState';
 import EmptyState from '../components/ui/EmptyState';
-import { useContractors, useReferralSources, useCommissions, usePartners } from '../hooks/useAirtable';
-import { contractorData, syncAdjustersToReferralSources, autoCreateCommissions } from '../services/airtable';
+import { useContractors, useCommissions, usePartners } from '../hooks/useAirtable';
+import { contractorData, autoCreateCommissions } from '../services/airtable';
 
 const statusColors = {
   Active: 'success',
@@ -20,7 +20,6 @@ const statusColors = {
 
 export default function Jobs({ contractorFilter }) {
   const { data: contractorsList, loading: contractorsLoading } = useContractors();
-  const { data: sources, refresh: refreshSources } = useReferralSources();
   const { data: existingCommissions, refresh: refreshCommissions } = useCommissions();
   const { data: partnersList } = usePartners();
 
@@ -41,17 +40,8 @@ export default function Jobs({ contractorFilter }) {
       setJobs(allJobs);
       setSynced(true);
 
-      // 2. Auto-sync adjusters into Referral Sources
-      const { created: newSources } = await syncAdjustersToReferralSources(allJobs);
-      let latestSources = sources;
-      if (newSources.length > 0) {
-        await refreshSources();
-        // Use the updated list (existing + newly created)
-        latestSources = [...sources, ...newSources];
-      }
-
-      // 3. Auto-create pending commissions for jobs that don't have one
-      const { created: newCommissions } = await autoCreateCommissions(allJobs, latestSources, partnersList);
+      // 2. Auto-create pending commissions for jobs that don't have one
+      const { created: newCommissions } = await autoCreateCommissions(allJobs, partnersList);
       if (newCommissions.length > 0) {
         await refreshCommissions();
       }

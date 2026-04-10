@@ -11,7 +11,6 @@ import EmptyState from '../components/ui/EmptyState';
 import { useReferralSources } from '../hooks/useAirtable';
 
 const typeColors = {
-  Adjuster: 'info',
   Contractor: 'purple',
   Realtor: 'success',
   'Property Manager': 'warning',
@@ -22,7 +21,7 @@ const typeColors = {
 const emptyForm = {
   Name: '',
   Company: '',
-  Type: 'Adjuster',
+  Type: 'Contractor',
   Email: '',
   Phone: '',
   'Default Comm Type': '% of Revenue',
@@ -58,7 +57,7 @@ export default function ReferralSources() {
     setForm({
       Name: source.Name || '',
       Company: source.Company || '',
-      Type: source.Type || 'Adjuster',
+      Type: source.Type || 'Contractor',
       Email: source.Email || '',
       Phone: source.Phone || '',
       'Default Comm Type': source['Default Comm Type'] || '% of Revenue',
@@ -256,7 +255,7 @@ export default function ReferralSources() {
               onChange={e => setForm({ ...form, Type: e.target.value })}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
-              {['Adjuster', 'Contractor', 'Realtor', 'Property Manager', 'Past Client', 'Other'].map(t => (
+              {['Contractor', 'Realtor', 'Property Manager', 'Past Client', 'Other'].map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>

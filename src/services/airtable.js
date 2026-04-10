@@ -273,69 +273,24 @@ export const contractorData = {
 const DEFAULT_COMMISSION_RATE = 10; // 10%
 
 /**
- * Calculate commission for a job based on its adjuster's referral source settings.
- * 1. Find adjuster name from job's "Adjuster Name" field
- * 2. Look for matching referral source
- * 3. Use that source's Default Comm Type / Default Comm Rate
- * 4. If no source found or no rate set, use default 10% of revenue
+ * Calculate commission for a job using the default rate.
+ * Uses 10% of revenue as the standard commission rate.
  */
-export function autoCalculateCommission(job, sources) {
+export function autoCalculateCommission(job) {
   const adjusterName = job['Adjuster Name'] || '';
   const revenue = job['Total Payout'] || job['RCV'] || 0;
 
-  // Find matching referral source for this adjuster
-  const source = adjusterName
-    ? sources.find(s => s.Name === adjusterName && s.Active !== false)
-    : null;
-
-  // Get commission settings from the referral source
-  const commType = source?.['Default Comm Type'] || '% of Revenue';
-  const commRate = source?.['Default Comm Rate'] || DEFAULT_COMMISSION_RATE;
-  const flatAmount = source?.['Default Flat Amount'] || 0;
-
-  // Flat Rate
-  if (commType === 'Flat Rate') {
-    return {
-      amount: flatAmount || commRate || 0,
-      basis: 'Flat Rate',
-      basisAmount: 0,
-      rate: flatAmount || commRate || 0,
-      rateType: 'Flat',
-      source,
-      adjusterName,
-      isDefault: !source,
-    };
-  }
-
-  // % of Profit
-  if (commType === '% of Profit') {
-    const costs = job.totalCosts || 0;
-    const basisAmount = revenue - costs;
-    const amount = basisAmount * (commRate / 100);
-    return {
-      amount,
-      basis: '% of Profit',
-      basisAmount,
-      rate: commRate,
-      rateType: 'Percentage',
-      source,
-      adjusterName,
-      isDefault: !source,
-    };
-  }
-
-  // % of Revenue (default)
   const basisAmount = revenue;
-  const amount = basisAmount * (commRate / 100);
+  const amount = basisAmount * (DEFAULT_COMMISSION_RATE / 100);
   return {
     amount,
     basis: '% of Revenue',
     basisAmount,
-    rate: commRate,
+    rate: DEFAULT_COMMISSION_RATE,
     rateType: 'Percentage',
-    source,
+    source: null,
     adjusterName,
-    isDefault: !source,
+    isDefault: true,
   };
 }
 
@@ -356,52 +311,11 @@ export function calculateCompanySplits(job, commissionAmount, partnersList) {
 }
 
 /**
- * Sync adjuster names from jobs into the Referral Sources table.
- * Creates new referral sources for any adjusters not already in the table.
- * Pulls email/phone from the claim if available.
- */
-export async function syncAdjustersToReferralSources(jobs) {
-  // Get existing referral sources
-  const existing = await referralSources.list();
-  const existingNames = new Set(existing.map(s => s.Name));
-
-  // Collect unique adjusters from jobs with their contact info
-  const adjusterMap = new Map();
-  for (const job of jobs) {
-    const name = job['Adjuster Name'];
-    if (!name || existingNames.has(name) || adjusterMap.has(name)) continue;
-    adjusterMap.set(name, {
-      Name: name,
-      Type: 'Adjuster',
-      Email: job['Adjuster Email'] || '',
-      Phone: job['Adjuster Phone'] || '',
-      'Default Comm Type': '% of Revenue',
-      'Default Comm Rate': 10,
-      Active: true,
-      Notes: `Auto-synced from ${job.contractorName || 'claims'}`,
-    });
-  }
-
-  // Create missing referral sources
-  const created = [];
-  for (const fields of adjusterMap.values()) {
-    try {
-      const record = await referralSources.create(fields);
-      created.push(record);
-    } catch (err) {
-      console.error(`Failed to create referral source for ${fields.Name}:`, err);
-    }
-  }
-
-  return { created, total: existing.length + created.length };
-}
-
-/**
  * Auto-create pending commissions for all jobs that don't already have one.
- * Uses the adjuster's referral source rate (or default 10%).
+ * Uses the default 10% of revenue rate.
  * Also creates company split records for each active partner.
  */
-export async function autoCreateCommissions(jobs, sourcesList, partnersList) {
+export async function autoCreateCommissions(jobs, partnersList) {
   // Get existing commissions to avoid duplicates
   const existing = await commissions.list();
   const existingJobIds = new Set(existing.map(c => c['Job ID']));
@@ -411,7 +325,7 @@ export async function autoCreateCommissions(jobs, sourcesList, partnersList) {
     const claimId = job['Claim ID'] || job.id;
     if (existingJobIds.has(claimId)) continue;
 
-    const calc = autoCalculateCommission(job, sourcesList);
+    const calc = autoCalculateCommission(job);
 
     try {
       // Create commission record
@@ -420,7 +334,7 @@ export async function autoCreateCommissions(jobs, sourcesList, partnersList) {
         'Job Source Base': job.contractorName,
         'Contractor Name': job.contractorName,
         'Adjuster Name': job['Adjuster Name'] || '',
-        'Referral Source Name': calc.source?.Name || calc.adjusterName || '',
+        'Referral Source Name': '',
         'Commission Basis': calc.basis || '% of Revenue',
         'Basis Amount': calc.basisAmount || 0,
         'Rate Applied': calc.rate || 0,
@@ -473,7 +387,7 @@ export default {
   contractorData,
   autoCalculateCommission,
   calculateCompanySplits,
-  syncAdjustersToReferralSources,
+
   autoCreateCommissions,
   isConfigured,
 };

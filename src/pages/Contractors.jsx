@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Building, Edit2, Trash2, Link, CheckCircle } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '../components/ui/Table';
@@ -20,7 +21,8 @@ const emptyForm = {
   Notes: '',
 };
 
-export default function Contractors() {
+export default function Contractors({ onSelectContractor }) {
+  const navigate = useNavigate();
   const { data: contractorsList, loading, error, refresh, create, update, remove } = useContractors();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -139,7 +141,15 @@ export default function Contractors() {
                           <Building className="w-5 h-5 text-purple-600" />
                         </div>
                         <div>
-                          <div className="font-medium text-gray-900">{contractor.Name}</div>
+                          <button
+                            className="font-medium text-purple-600 hover:text-purple-800 hover:underline text-left"
+                            onClick={() => {
+                              onSelectContractor?.(contractor.Name);
+                              navigate('/jobs');
+                            }}
+                          >
+                            {contractor.Name}
+                          </button>
                           {contractor.Notes && (
                             <div className="text-sm text-gray-500 truncate max-w-[200px]">{contractor.Notes}</div>
                           )}

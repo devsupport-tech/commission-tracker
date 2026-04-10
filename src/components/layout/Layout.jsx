@@ -40,7 +40,7 @@ export default function Layout({ children }) {
         onContractorFilterChange={setContractorFilter}
       />
       <main className="flex-1 overflow-auto">
-        {typeof children === 'function' ? children(contractorFilter) : children}
+        {typeof children === 'function' ? children(contractorFilter, setContractorFilter) : children}
       </main>
     </div>
   );

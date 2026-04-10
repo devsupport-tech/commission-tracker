@@ -41,7 +41,7 @@ export function generateHandoffPDF(commission, extras = {}) {
   y = sectionLabel(doc, 'Claim', margin, y, gray);
   y = optField(doc, 'Claim ID', commission['Job ID'], margin, y, black, gray);
   y = optField(doc, 'Contractor', commission['Contractor Name'], margin, y, black, gray);
-  y = optField(doc, 'Adjuster', commission['Adjuster Name'] || commission['Referral Source Name'], margin, y, black, gray);
+  y = optField(doc, 'Adjuster', commission['Adjuster Name'], margin, y, black, gray);
   y = optField(doc, 'Date', commission['Date Calculated'], margin, y, black, gray);
   y += 4;
 

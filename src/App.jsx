@@ -11,13 +11,13 @@ function App() {
   return (
     <BrowserRouter>
       <Layout>
-        {(contractorFilter) => (
+        {(contractorFilter, setContractorFilter) => (
           <Routes>
             <Route path="/" element={<Overview contractorFilter={contractorFilter} />} />
             <Route path="/referral-sources" element={<ReferralSources />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/company-splits" element={<CompanySplits />} />
-            <Route path="/contractors" element={<Contractors />} />
+            <Route path="/contractors" element={<Contractors onSelectContractor={setContractorFilter} />} />
             <Route path="/jobs" element={<Jobs contractorFilter={contractorFilter} />} />
           </Routes>
         )}
