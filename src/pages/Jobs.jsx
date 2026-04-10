@@ -50,7 +50,7 @@ export default function Jobs({ contractorFilter }) {
     } finally {
       setLoading(false);
     }
-  }, [contractorsList, sources, partnersList, refreshSources, refreshCommissions]);
+  }, [contractorsList, partnersList, refreshCommissions]);
 
   // Auto-sync on first load when contractors are available
   useEffect(() => {
